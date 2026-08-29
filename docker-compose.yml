@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    container_name: dynamic_voice_bot
+    restart: unless-stopped
+    depends_on:
+      - db
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://bot_user:bot_password@db:5432/voicebot_db
+    deploy:
+      resources:
+        limits:
+          cpus: '0.8'
+          memory: 1536M
+
+  db:
+    image: postgres:15-alpine
+    container_name: voicebot_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bot_user
+      POSTGRES_PASSWORD: bot_password
+      POSTGRES_DB: voicebot_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  xray:
+    image: teddysun/xray:latest
+    container_name: voicebot_xray
+    restart: unless-stopped
+    profiles:
+      - spotify
+    volumes:
+      - ./xray:/etc/xray
+
+volumes:
+  postgres_data:

@@ -1,0 +1,18 @@
+name: Fetch Logs
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fetch_logs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get Docker Logs
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            cd /root/DynamicVoiceBot
+            docker compose logs --tail=1000 || docker-compose logs --tail=1000

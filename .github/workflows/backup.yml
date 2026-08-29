@@ -1,0 +1,70 @@
+name: Auto Backup Database
+
+on:
+  schedule:
+    - cron: '0 4 * * *' # Каждое утро в 04:00 UTC
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create and compress DB Dump on Server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            docker exec voicebot_postgres pg_dump -U bot_user -d voicebot_db -c -C --if-exists | gzip > /tmp/voicebot_db_backup.sql.gz
+            echo "Dump created and compressed on server."
+
+      - name: Download backup to Runner
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y sshpass
+          mkdir -p tmp
+          sshpass -p "$SSH_PASSWORD" scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$SSH_USER@$SSH_HOST:/tmp/voicebot_db_backup.sql.gz" "tmp/voicebot_db_backup.sql.gz"
+
+      - name: Send backup to Lolka webhook
+        run: |
+          BACKUP_FILE="tmp/voicebot_db_backup.sql.gz"
+          if [ ! -f "$BACKUP_FILE" ]; then
+            echo "Backup file not found!"
+            exit 0
+          fi
+          
+          DATE=$(date -u +%Y-%m-%d)
+          SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
+
+          # Переименовываем файл с датой для удобства
+          DATED_FILE="voicebot_backup_${DATE}.sql.gz"
+          cp "$BACKUP_FILE" "$DATED_FILE"
+
+          # Формируем JSON payload
+          PAYLOAD=$(cat <<EOF
+          {"embeds":[{"title":"💾 Auto Backup — ${DATE}","description":"Ежедневный бэкап базы данных PostgreSQL.","color":5763719,"fields":[{"name":"📦 Размер","value":"${SIZE}","inline":true},{"name":"📅 Дата","value":"${DATE} UTC","inline":true}],"footer":{"text":"DynamicVoiceBot • GitHub Actions"}}]}
+          EOF
+          )
+
+          # Если установлен вебхук, отправляем файл
+          if [ -n "${{ secrets.BACKUP_WEBHOOK_URL }}" ]; then
+            curl -f -X POST \
+              "${{ secrets.BACKUP_WEBHOOK_URL }}" \
+              -F "files[0]=@${DATED_FILE}" \
+              -F "payload_json=${PAYLOAD}"
+          else
+            echo "BACKUP_WEBHOOK_URL is not set, skipping webhook upload."
+          fi
+
+      - name: Cleanup Server Dump
+        if: always()
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: rm -f /tmp/voicebot_db_backup.sql.gz

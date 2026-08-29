@@ -1,0 +1,63 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '.github/**'
+      - 'docs/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            # Ensure docker and docker-compose-plugin are installed (if missing)
+            if ! command -v docker &> /dev/null; then
+              curl -fsSL https://get.docker.com -o get-docker.sh
+              sh get-docker.sh
+            fi
+            
+            # If repo doesn't exist, clone it with auth
+            if [ ! -d "/root/DynamicVoiceBot" ]; then
+              git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git /root/DynamicVoiceBot
+            fi
+            
+            # Go to the project directory
+            cd /root/DynamicVoiceBot
+            
+            # Reset and Pull the latest changes
+            git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+            git fetch --all
+            git reset --hard origin/main
+            
+            # Create the .env file with secrets
+            echo "DISCORD_TOKEN=${{ secrets.DISCORD_TOKEN }}" > .env
+            echo "DATABASE_URL=postgresql://bot_user:bot_password@db:5432/voicebot_db" >> .env
+            echo "LOG_LEVEL=INFO" >> .env
+            echo "DISCORD_LOG_WEBHOOK_URL=${{ secrets.DISCORD_LOG_WEBHOOK_URL }}" >> .env
+            echo "ENABLE_LOFI_RADIO=true" >> .env
+            echo "ENABLE_YANDEX_MUSIC=true" >> .env
+            echo "ENABLE_BLEND=true" >> .env
+            echo "ENABLE_RUTUBE_MUSIC=true" >> .env
+            echo "YM_ENCRYPTION_KEY=${{ secrets.YM_ENCRYPTION_KEY }}" >> .env
+            echo "ENABLE_SPOTIFY=true" >> .env
+            echo "COMPOSE_PROFILES=spotify" >> .env
+            echo "SPOTIFY_PROXY=http://xray:10809" >> .env
+            echo "YTDLP_PROXY=http://xray:10809" >> .env
+            echo "STREAM_PROXY=http://xray:10809" >> .env
+            
+            # Donation links (optional, configure in GitHub Secrets)
+            echo "DONATION_BOOSTY_URL=${{ secrets.DONATION_BOOSTY_URL }}" >> .env
+            echo "DONATION_ALERTS_URL=${{ secrets.DONATION_ALERTS_URL }}" >> .env
+            
+            # Stop the old container, rebuild and start
+            docker compose down || docker-compose down || true
+            docker compose up -d --build || docker-compose up -d --build

@@ -1,0 +1,52 @@
+name: Production Monitoring
+
+on:
+  schedule:
+    - cron: '0 0,12 * * *' # Запуск 2 раза в сутки (в 00:00 и 12:00 UTC)
+  workflow_dispatch: # Позволяет запускать скрипт вручную из интерфейса GitHub
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install paramiko
+
+      - name: Run monitoring script
+        env:
+          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          PROD_SSH_PORT: ${{ secrets.PROD_SSH_PORT }} # По умолчанию 22 (можно не задавать)
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          PROD_SSH_PASS: ${{ secrets.PROD_SSH_PASS }}
+        run: |
+          # Скрипт сам подхватит переменные окружения
+          python scratch/check_prod.py > prod_report.txt
+          
+          # Выводим в консоль Actions для быстрого просмотра
+          cat prod_report.txt
+
+      - name: Send Report to Webhook
+        run: |
+          # Отправляем текстовый файл отчета прямо в Lolka (Discord API)
+          if [ -n "${{ secrets.PROD_WEBHOOK_URL }}" ]; then
+            curl -F 'payload_json={"content": "**📅 Ежедневный отчет с продакшена (GitHub Actions)**"}' \
+                 -F "files[0]=@prod_report.txt" \
+                 "${{ secrets.PROD_WEBHOOK_URL }}"
+          else
+            echo "PROD_WEBHOOK_URL is not set, skipping webhook upload."
+          fi
+
+      - name: Upload Report as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Production-Report-${{ github.run_id }}
+          path: prod_report.txt
+          retention-days: 90 # Храним статистику 3 месяца
